@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2a2e">
+<title>MoodVoice</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎙️%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e6e3dc;--ink:#1f2a2e;--soft:#5d676b;--tile:#f7f5f0;--accent:#c4452d;--line:#cfcbc1;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1f2a2e;--ink:#ece9e1;--soft:#98a3a6;--tile:#2b383d;--accent:#ff7a5c;--line:#3a484e;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1f2a2e;--ink:#ece9e1;--soft:#98a3a6;--tile:#2b383d;--accent:#ff7a5c;--line:#3a484e;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.5 "Bricolage Grotesque",system-ui,sans-serif;min-height:100%;
+ padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 32px);max-width:640px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center}
+h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.02em}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ghost{background:none;border:1px solid var(--line);border-radius:999px;padding:6px 14px}
+.mic{display:block;margin:28px auto 12px;width:104px;height:104px;border-radius:50%;border:0;background:var(--accent);color:#fff;font-size:2.4rem;box-shadow:0 0 0 8px color-mix(in srgb,var(--accent) 22%,transparent)}
+.mic.on{animation:pulse 1.2s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 20px color-mix(in srgb,var(--accent) 8%,transparent)}}
+@media (prefers-reduced-motion:reduce){.mic.on{animation:none}}
+.hint{text-align:center;color:var(--soft);min-height:3em;margin:0 0 16px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.chip{background:var(--tile);border:1px solid var(--line);border-radius:999px;padding:4px 6px 4px 14px;display:flex;gap:6px;align-items:center}
+.chip button{background:none;border:0;color:var(--soft);font-size:1.1rem;line-height:1;padding:2px 6px}
+.add{border:1px dashed var(--line);background:none;border-radius:999px;padding:4px 14px;color:var(--ink);width:9em}
+.go{width:100%;padding:12px;border-radius:12px;border:0;background:var(--ink);color:var(--bg);font-weight:600;margin-bottom:20px}
+.board{columns:2;column-gap:10px}
+.board figure{margin:0 0 10px;break-inside:avoid;background:var(--tile);padding:6px 6px 4px;border-radius:4px;box-shadow:0 1px 0 var(--line)}
+.board figure:nth-child(3n+1){transform:rotate(-1.2deg)}
+.board figure:nth-child(3n){transform:rotate(1deg)}
+.board img{width:100%;display:block;border-radius:2px}
+figcaption{font-size:.7rem;color:var(--soft);padding:3px 2px}
+figcaption a{color:inherit}
+.video{position:relative;aspect-ratio:16/9;margin:18px 0 6px;border-radius:8px;overflow:hidden;background:#000}
+.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.title{font-size:.85rem;color:var(--soft);margin:0 0 20px}
+dialog{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:14px;width:min(92vw,420px)}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+label{display:block;margin:12px 0 4px;font-weight:600;font-size:.9rem}
+dialog input{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--tile);color:var(--ink);font:inherit}
+.small{font-size:.8rem;color:var(--soft)}
+.err{color:var(--accent);text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>MoodVoice</h1>
+  <button class="ghost" id="cfg">Chiavi API</button>
+</header>
+
+<button class="mic" id="mic" aria-label="Avvia o ferma l'ascolto">🎙️</button>
+<p class="hint" id="hint">Tocca il microfono e descrivi l'atmosfera che immagini.</p>
+
+<div class="chips" id="chips" hidden></div>
+<button class="go" id="go" hidden>Genera mood board e suoni</button>
+<p class="err" id="err" role="alert"></p>
+
+<section class="board" id="board"></section>
+<div id="vid"></div>
+
+<dialog id="dlg">
+  <form method="dialog" id="cfgForm">
+    <h2 style="margin-top:0">Chiavi API</h2>
+    <p class="small">Restano solo su questo dispositivo (localStorage).</p>
+    <label for="uk">Unsplash Access Key</label>
+    <input id="uk" autocomplete="off" autocapitalize="off">
+    <label for="yk">YouTube Data API v3 key</label>
+    <input id="yk" autocomplete="off" autocapitalize="off">
+    <p style="text-align:right;margin-bottom:0"><button class="ghost" value="ok">Salva</button></p>
+  </form>
+</dialog>
+
+<script>
+(function(){
+const $=s=>document.getElementById(s);
+const store={get(k){try{return localStorage.getItem(k)||""}catch(e){return ""}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const STOP=new Set(("a ad al allo alla alle agli ai anche che chi ci come con contro cui da dal dallo dalla dalle dei del dello della delle degli di dove e ed era ero essere fra gli ha ho i il in io la le lei lo loro lui ma me mi mia mie miei mio ne nei nel nello nella nelle no noi non nostro o per perché perche più piu quando quanto quasi quel quella quello questa queste questi questo se sei si sia siamo sono sta stai stanno stare sto su sua sue sui sul sulla sulle suo suoi ti tra tu tua tue tuo tuoi tutti tutto un una uno vi voi vorrei voglio vorrebbe vuole c'è cosa così cosi poi più molto molta molti tanto tanta già ancora sempre solo anche però invece dove dentro fuori ogni quasi sopra sotto verso mentre magari tipo praticamente allora ecco ok ehm").split(" "));
+
+let words=[],transcript="",rec=null,listening=false;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+
+function extract(text){
+  const count={};
+  text.toLowerCase().replace(/[^\p{L}\s'-]/gu," ").split(/\s+/).forEach(w=>{
+    w=w.replace(/^[l|d|un|c|nell|dell|all|sull]+'/,"");
+    if(w.length>3&&!STOP.has(w))count[w]=(count[w]||0)+1;
+  });
+  return Object.entries(count).sort((a,b)=>b[1]-a[1]).map(e=>e[0]).slice(0,5);
+}
+
+function renderChips(){
+  const c=$("chips");c.hidden=false;$("go").hidden=false;c.innerHTML="";
+  words.forEach((w,i)=>{
+    const d=document.createElement("span");d.className="chip";
+    d.append(w);
+    const b=document.createElement("button");b.textContent="×";b.setAttribute("aria-label","Rimuovi "+w);
+    b.onclick=()=>{words.splice(i,1);renderChips()};
+    d.append(b);c.append(d);
+  });
+  const inp=document.createElement("input");inp.className="add";inp.placeholder="+ aggiungi";
+  inp.onkeydown=e=>{if(e.key==="Enter"&&inp.value.trim()){words.push(inp.value.trim().toLowerCase());renderChips();$("chips").querySelector("input").focus()}};
+  c.append(inp);
+}
+
+function setErr(m){$("err").textContent=m||""}
+
+function toggleMic(){
+  if(!SR){setErr("Il riconoscimento vocale richiede Chrome su Android, aperto in https.");return}
+  if(listening){rec.stop();return}
+  setErr("");transcript="";
+  rec=new SR();rec.lang="it-IT";rec.continuous=true;rec.interimResults=true;
+  rec.onstart=()=>{listening=true;$("mic").classList.add("on");$("hint").textContent="Ti ascolto… tocca di nuovo per fermare."};
+  rec.onresult=e=>{
+    let t="";for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript+" ";
+    transcript=t;$("hint").textContent="“"+t.trim()+"”";
+  };
+  rec.onerror=e=>setErr(e.error==="not-allowed"?"Consenti l'accesso al microfono nelle impostazioni del sito.":"Errore microfono: "+e.error);
+  rec.onend=()=>{
+    listening=false;$("mic").classList.remove("on");
+    words=extract(transcript);
+    if(words.length){renderChips();generate()}
+    else if(transcript)setErr("Non ho trovato parole chiave: prova a descrivere di più o aggiungile a mano.");
+  };
+  rec.start();
+}
+
+async function generate(){
+  setErr("");
+  const uk=store.get("uk"),yk=store.get("yk");
+  if(!words.length){setErr("Aggiungi almeno una parola chiave.");return}
+  if(!uk&&!yk){setErr("Inserisci le chiavi API (pulsante in alto).");$("dlg").showModal();return}
+  $("board").innerHTML="";$("vid").innerHTML="";
+  await Promise.all([uk?board(uk):0,yk?video(yk):0]);
+}
+
+async function board(key){
+  try{
+    const per=Math.max(2,Math.ceil(9/words.length));
+    const res=await Promise.all(words.map(w=>
+      fetch("https://api.unsplash.com/search/photos?per_page="+per+"&query="+encodeURIComponent(w),{headers:{Authorization:"Client-ID "+key}}).then(r=>{if(!r.ok)throw new Error("Unsplash "+r.status);return r.json()})));
+    const seen=new Set(),items=[];
+    for(let i=0;i<per;i++)res.forEach(r=>{const p=r.results[i];if(p&&!seen.has(p.id)){seen.add(p.id);items.push(p)}});
+    $("board").innerHTML="";
+    items.slice(0,10).forEach(p=>{
+      const f=document.createElement("figure"),im=document.createElement("img");
+      im.src=p.urls.small;im.alt=p.alt_description||"";im.loading="lazy";
+      const c=document.createElement("figcaption"),a=document.createElement("a");
+      a.href=p.user.links.html+"?utm_source=moodvoice&utm_medium=referral";a.target="_blank";a.rel="noopener";a.textContent=p.user.name;
+      c.append(a," su Unsplash");f.append(im,c);$("board").append(f);
+    });
+    if(!items.length)setErr("Nessuna foto trovata per queste parole.");
+  }catch(e){setErr("Immagini non caricate: "+e.message)}
+}
+
+async function video(key){
+  try{
+    const q=words.join(" ")+" ambience";
+    const u="https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=long&maxResults=1&q="+encodeURIComponent(q)+"&key="+encodeURIComponent(key);
+    const r=await fetch(u);if(!r.ok)throw new Error("YouTube "+r.status);
+    const d=await r.json();const v=d.items&&d.items[0];
+    if(!v){setErr("Nessun video trovato.");return}
+    const id=v.id.videoId;
+    $("vid").innerHTML='<div class="video"><iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&loop=1&playlist='+id+'&playsinline=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Sottofondo"></iframe></div><p class="title"></p>';
+    $("vid").querySelector(".title").textContent=v.snippet.title;
+  }catch(e){setErr("Video non caricato: "+e.message)}
+}
+
+$("mic").onclick=toggleMic;
+$("go").onclick=generate;
+$("cfg").onclick=()=>{$("uk").value=store.get("uk");$("yk").value=store.get("yk");$("dlg").showModal()};
+$("cfgForm").addEventListener("submit",()=>{store.set("uk",$("uk").value.trim());store.set("yk",$("yk").value.trim())});
+
+// manifest PWA
+try{
+  const icon="data:image/svg+xml,"+encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='#c4452d'/><text x='256' y='360' font-size='300' text-anchor='middle'>🎙️</text></svg>");
+  const m={name:"MoodVoice",short_name:"MoodVoice",display:"standalone",start_url:location.href.split("#")[0],background_color:"#1f2a2e",theme_color:"#1f2a2e",icons:[{src:icon,sizes:"512x512",type:"image/svg+xml",purpose:"any"}]};
+  const l=document.createElement("link");l.rel="manifest";l.href=URL.createObjectURL(new Blob([JSON.stringify(m)],{type:"application/manifest+json"}));document.head.append(l);
+}catch(e){}
+})();
+</script>
+</body>
+</html>
