@@ -41,6 +41,13 @@ figcaption a{color:inherit}
 .video{position:relative;aspect-ratio:16/9;margin:18px 0 6px;border-radius:8px;overflow:hidden;background:#000}
 .video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .title{font-size:.85rem;color:var(--soft);margin:0 0 20px}
+.go{display:block;text-align:center;text-decoration:none;border:0;cursor:pointer}
+.pin{background:none;border:1px solid var(--ink);color:var(--ink);margin-top:-12px}
+.board img{height:auto}
+.sentinel{height:1px}
+.vlabel{font-weight:800;margin:22px 0 0}
+.vol{display:flex;gap:10px;align-items:center;font-size:.85rem;color:var(--soft);margin:0;font-weight:400}
+.vol input{flex:1;padding:0;accent-color:var(--accent)}
 dialog{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:14px;width:min(92vw,420px)}
 dialog::backdrop{background:rgba(0,0,0,.5)}
 label{display:block;margin:12px 0 4px;font-weight:600;font-size:.9rem}
@@ -60,9 +67,11 @@ dialog input{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
 
 <div class="chips" id="chips" hidden></div>
 <button class="go" id="go" hidden>Genera mood board e suoni</button>
+<a class="go pin" id="pin" target="_blank" rel="noopener" hidden>Cerca le stesse parole su Pinterest</a>
 <p class="err" id="err" role="alert"></p>
 
 <section class="board" id="board"></section>
+<div id="sentinel" class="sentinel"></div>
 <div id="vid"></div>
 
 <dialog id="dlg">
@@ -96,7 +105,7 @@ function extract(text){
 }
 
 function renderChips(){
-  const c=$("chips");c.hidden=false;$("go").hidden=false;c.innerHTML="";
+  const c=$("chips");c.hidden=false;$("go").hidden=false;$("pin").hidden=false;$("pin").href="https://www.pinterest.com/search/pins/?q="+encodeURIComponent(words.join(" "));c.innerHTML="";
   words.forEach((w,i)=>{
     const d=document.createElement("span");d.className="chip";
     d.append(w);
@@ -131,45 +140,100 @@ function toggleMic(){
   rec.start();
 }
 
+const state={n:0,loading:false,seen:new Set(),tags:{},pages:{},done:false,empty:0,key:""};
+const obs=new IntersectionObserver(es=>{if(es[0].isIntersecting)more()},{rootMargin:"1200px"});
+obs.observe($("sentinel"));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+
 async function generate(){
   setErr("");
   const uk=store.get("uk"),yk=store.get("yk");
   if(!words.length){setErr("Aggiungi almeno una parola chiave.");return}
   if(!uk&&!yk){setErr("Inserisci le chiavi API (pulsante in alto).");$("dlg").showModal();return}
   $("board").innerHTML="";$("vid").innerHTML="";
-  await Promise.all([uk?board(uk):0,yk?video(yk):0]);
+  Object.assign(state,{n:0,loading:false,seen:new Set(),tags:{},pages:{},done:false,empty:0,key:uk});
+  await Promise.all([uk?more():0,yk?sounds(yk):0]);
 }
 
-async function board(key){
+/* ---------- Immagini: scroll infinito con deriva delle parole ---------- */
+function nextQuery(){
+  const n=state.n++;
+  if(n<words.length)return words[n];
+  const tags=Object.entries(state.tags).sort((a,b)=>b[1]-a[1]).map(e=>e[0]).filter(t=>!words.includes(t));
+  const base=pick(words);
+  const drift=Math.min(.9,(n-words.length+1)*.1);
+  if(tags.length&&Math.random()<drift){
+    const t=pick(tags.slice(0,6+n*2));
+    return Math.random()<.5?base+" "+t:t;
+  }
+  return base;
+}
+
+async function more(){
+  if(state.loading||state.done||!state.key)return;
+  state.loading=true;
+  const q=nextQuery(),page=(state.pages[q]=(state.pages[q]||0)+1);
+  let added=0;
   try{
-    const per=Math.max(2,Math.ceil(9/words.length));
-    const res=await Promise.all(words.map(w=>
-      fetch("https://api.unsplash.com/search/photos?per_page="+per+"&query="+encodeURIComponent(w),{headers:{Authorization:"Client-ID "+key}}).then(r=>{if(!r.ok)throw new Error("Unsplash "+r.status);return r.json()})));
-    const seen=new Set(),items=[];
-    for(let i=0;i<per;i++)res.forEach(r=>{const p=r.results[i];if(p&&!seen.has(p.id)){seen.add(p.id);items.push(p)}});
-    $("board").innerHTML="";
-    items.slice(0,10).forEach(p=>{
+    const r=await fetch("https://api.unsplash.com/search/photos?per_page=30&page="+page+"&query="+encodeURIComponent(q),{headers:{Authorization:"Client-ID "+state.key}});
+    if(r.status===403||r.status===429){state.done=true;setErr("Limite orario di Unsplash raggiunto (50 richieste/ora in modalità demo). Riprova più tardi.");return}
+    if(!r.ok)throw new Error("Unsplash "+r.status);
+    const d=await r.json();
+    (d.results||[]).forEach(p=>{
+      (p.tags||[]).forEach(t=>{const k=(t.title||"").toLowerCase();if(k)state.tags[k]=(state.tags[k]||0)+1});
+      if(state.seen.has(p.id))return;
+      state.seen.add(p.id);added++;
       const f=document.createElement("figure"),im=document.createElement("img");
-      im.src=p.urls.small;im.alt=p.alt_description||"";im.loading="lazy";
+      im.src=p.urls.small;im.width=p.width;im.height=p.height;im.alt=p.alt_description||"";im.loading="lazy";
       const c=document.createElement("figcaption"),a=document.createElement("a");
       a.href=p.user.links.html+"?utm_source=moodvoice&utm_medium=referral";a.target="_blank";a.rel="noopener";a.textContent=p.user.name;
       c.append(a," su Unsplash");f.append(im,c);$("board").append(f);
     });
-    if(!items.length)setErr("Nessuna foto trovata per queste parole.");
-  }catch(e){setErr("Immagini non caricate: "+e.message)}
+  }catch(e){setErr("Immagini non caricate: "+e.message);state.done=true}
+  finally{state.loading=false}
+  state.empty=added?0:state.empty+1;
+  if(state.empty>=6)state.done=true;
+  if(!state.done&&$("sentinel").getBoundingClientRect().top<innerHeight+1200)setTimeout(more,60);
 }
 
-async function video(key){
+/* ---------- Audio: due video (rumori + musica), con riduzione parole ---------- */
+async function findVideo(key,suffix){
+  const w=words.slice();
+  while(w.length){
+    const q=w.join(" ")+" "+suffix;
+    const r=await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=long&maxResults=1&q="+encodeURIComponent(q)+"&key="+encodeURIComponent(key));
+    if(!r.ok)throw new Error("YouTube "+r.status);
+    const d=await r.json();
+    if(d.items&&d.items.length)return {v:d.items[0],used:w.join(" ")};
+    w.pop();
+  }
+  return null;
+}
+
+function player(box,label,res,vol){
+  box.innerHTML='<p class="vlabel"></p>';
+  box.querySelector(".vlabel").textContent=label;
+  if(!res){box.append(Object.assign(document.createElement("p"),{className:"title",textContent:"Nessun video trovato."}));return}
+  const id=res.v.id.videoId;
+  const wrap=document.createElement("div");
+  wrap.innerHTML='<div class="video"><iframe allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="'+label+'"></iframe></div><label class="vol">Volume <input type="range" min="0" max="100" value="'+vol+'"></label><p class="title"></p>';
+  const ifr=wrap.querySelector("iframe"),rng=wrap.querySelector("input");
+  const setVol=v=>ifr.contentWindow.postMessage(JSON.stringify({event:"command",func:"setVolume",args:[+v]}),"*");
+  ifr.src="https://www.youtube.com/embed/"+id+"?autoplay=1&loop=1&playlist="+id+"&playsinline=1&enablejsapi=1";
+  ifr.onload=()=>setTimeout(()=>setVol(vol),1000);
+  rng.oninput=()=>setVol(rng.value);
+  wrap.querySelector(".title").textContent=res.v.snippet.title+" (ricerca: "+res.used+")";
+  box.append(wrap);
+}
+
+async function sounds(key){
+  const a=document.createElement("div"),b=document.createElement("div");
+  $("vid").append(a,b);
   try{
-    const q=words.join(" ")+" ambience";
-    const u="https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=long&maxResults=1&q="+encodeURIComponent(q)+"&key="+encodeURIComponent(key);
-    const r=await fetch(u);if(!r.ok)throw new Error("YouTube "+r.status);
-    const d=await r.json();const v=d.items&&d.items[0];
-    if(!v){setErr("Nessun video trovato.");return}
-    const id=v.id.videoId;
-    $("vid").innerHTML='<div class="video"><iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&loop=1&playlist='+id+'&playsinline=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Sottofondo"></iframe></div><p class="title"></p>';
-    $("vid").querySelector(".title").textContent=v.snippet.title;
-  }catch(e){setErr("Video non caricato: "+e.message)}
+    const [s,m]=await Promise.all([findVideo(key,"ambience sounds no music"),findVideo(key,"ambient music")]);
+    player(a,"Rumori d'ambiente",s,80);
+    player(b,"Musica di sottofondo",m,35);
+  }catch(e){setErr("Video non caricati: "+e.message)}
 }
 
 $("mic").onclick=toggleMic;
